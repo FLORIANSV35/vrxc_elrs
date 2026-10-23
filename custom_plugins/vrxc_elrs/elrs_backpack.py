@@ -98,12 +98,11 @@ class ELRSBackpack(VRxController):
             if RH_GPIO.is_real_hw_GPIO():
                 logger.info("Turning on GPIO pins for NuclearHazard boards")
                 RH_GPIO.setmode(RH_GPIO.BCM)
-                RH_GPIO.setup(16, RH_GPIO.OUT, initial=RH_GPIO.HIGH)
-                gevent.sleep(0.5)
-                RH_GPIO.setup(11, RH_GPIO.OUT, initial=RH_GPIO.HIGH)
-                gevent.sleep(0.5)
+                RH_GPIO.setup(16, RH_GPIO.OUT)
+                RH_GPIO.setup(11, RH_GPIO.OUT)
+                RH_GPIO.output(16, RH_GPIO.HIGH)
                 RH_GPIO.output(11, RH_GPIO.LOW)
-                gevent.sleep()
+                gevent.sleep(0.5)
                 RH_GPIO.output(11, RH_GPIO.HIGH)
 
                 self._establish_connection(con.type_)
