@@ -24,6 +24,15 @@ Basé sur [VRxC_ELRS](https://github.com/i-am-grub/VRxC_ELRS) (GPL-3.0) : toute 
 
 Garder l'onglet ouvert pendant l'événement. Un seul PC/onglet bridge à la fois.
 
+## Changement de canal depuis le backpack de la radio
+
+Quand un pilote change son canal VTX depuis sa radio, le backpack de la radio diffuse un `MSP_SET_VTX_CONFIG`. Si le firmware de l'ESP timer remonte ce paquet par l'USB, le plugin applique la fréquence au node choisi.
+
+- Réglage : *Settings → ELRS Backpack General Settings → Node for Backpack Channel Changes* (0 = désactivé).
+- Le paquet peut contenir un index de table VTX (bandes A B E F R L, 8 canaux) ou une fréquence en MHz. Les fréquences hors table sont appliquées sans bande ni canal.
+- Ignoré pendant une manche (staging ou course), pour ne pas décaler un node en plein chronométrage.
+- Le firmware **Race Timer officiel ne remonte pas** ce paquet : il faut un firmware ESP modifié.
+
 ## Limites connues
 
 - Chrome/Edge uniquement (pas de Web Serial dans Firefox/Safari).

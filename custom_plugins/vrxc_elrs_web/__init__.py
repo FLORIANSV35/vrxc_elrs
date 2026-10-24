@@ -81,6 +81,16 @@ def initialize(rhapi: RHAPI.RHAPI):
     )
     rhapi.fields.register_option(_autosave_on_stop, "elrs_settings")
 
+    _vtx_node = UIField(
+        "_vtx_node",
+        "Node for Backpack Channel Changes",
+        desc="Node moved to the video channel sent by a pilot's transmitter backpack "
+        "(MSP_SET_VTX_CONFIG). 0 - disabled. Ignored while a race is running.",
+        field_type=UIFieldType.BASIC_INT,
+        value=0,
+    )
+    rhapi.fields.register_option(_vtx_node, "elrs_settings")
+
     rhapi.ui.register_markdown(
         "elrs_settings",
         "elrs_web_help",

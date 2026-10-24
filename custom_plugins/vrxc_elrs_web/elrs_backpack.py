@@ -1,4 +1,5 @@
 import hashlib
+import json
 import logging
 
 import gevent
@@ -11,6 +12,7 @@ from VRxControl import VRxController
 
 from .connections import BackpackConnection, ConnectionTypeEnum, web_bridge
 from .msp import MSPPacket, MSPPacketType, MSPTypes
+from .vtx import decode_vtx_config
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +177,10 @@ class ELRSBackpack(VRxController):
 
                 function_ = packet.function
 
+                if function_ == MSPTypes.MSP_SET_VTX_CONFIG:
+                    self.vtx_config_received(packet.payload)
+                    continue
+
                 if packet.type_ == MSPPacketType.RESPONSE:
                     if function_ == MSPTypes.MSP_ELRS_GET_BACKPACK_VERSION:
                         version = bytes(i for i in packet.payload if i != 0).decode(
@@ -194,6 +200,57 @@ class ELRSBackpack(VRxController):
 
         except KeyboardInterrupt:
             logger.error("Stopping blackpack connector greenlet")
+
+    def vtx_config_received(self, payload: bytes) -> None:
+        """
+        Moves the node selected in the plugin settings to the video channel
+        a pilot's transmitter backpack just announced
+
+        :param payload: The MSP_SET_VTX_CONFIG payload
+        """
+        node = self._rhapi.db.option("_vtx_node", None, as_int=True) or 0
+        if node == 0:
+            return
+
+        decoded = decode_vtx_config(payload)
+        if decoded is None:
+            logger.warning("Unusable VTX channel from backpack: %s", payload.hex())
+            return
+
+        band, channel, frequency = decoded
+
+        if not 1 <= node <= len(self._rhapi.interface.seats):
+            message = f"Backpack channel ignored: node {node} does not exist"
+            self._rhapi.ui.message_notify(self._rhapi.language.__(message))
+            return
+
+        if self._rhapi.race.status in (RaceStatus.STAGING, RaceStatus.RACING):
+            message = "Backpack channel ignored: race in progress"
+            self._rhapi.ui.message_notify(self._rhapi.language.__(message))
+            return
+
+        profile = self._rhapi.race.frequencyset
+        freqs = json.loads(profile.frequencies)
+
+        # Same padding RotorHazard applies when nodes were added after the set was made
+        while node > len(freqs["f"]):
+            freqs["b"].append(None)
+            freqs["c"].append(None)
+            freqs["f"].append(0)
+
+        index = node - 1
+        if freqs["f"][index] == frequency:
+            return
+
+        freqs["b"][index] = band
+        freqs["c"][index] = channel
+        freqs["f"][index] = frequency
+        self._rhapi.db.frequencyset_alter(profile.id, frequencies=freqs)
+
+        label = f"{band}{channel} " if band else ""
+        message = f"Node {node} set to {label}{frequency} MHz from backpack"
+        logger.info(message)
+        self._rhapi.ui.message_notify(self._rhapi.language.__(message))
 
     def disconnect(self, *_) -> None:
         """
