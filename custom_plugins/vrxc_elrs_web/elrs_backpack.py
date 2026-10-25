@@ -11,10 +11,16 @@ from RHRace import RaceStatus, WinCondition
 from VRxControl import VRxController
 
 from .connections import BackpackConnection, ConnectionTypeEnum, web_bridge
+from . import channels
 from .msp import MSPPacket, MSPPacketType, MSPTypes
 from .vtx import decode_vtx_config
 
 logger = logging.getLogger(__name__)
+
+# Values of the "Backpack Channel Mode" option
+VTX_MODE_OFF = 0
+VTX_MODE_RECEIVE = 1
+VTX_MODE_SEND = 2
 
 
 class CancelError(BaseException): ...
@@ -201,6 +207,137 @@ class ELRSBackpack(VRxController):
         except KeyboardInterrupt:
             logger.error("Stopping blackpack connector greenlet")
 
+    #
+    # Sending video channels to pilots
+    #
+
+    def send_vtx_index(self, index: int) -> None:
+        """
+        Sends the packet that sets the video channel of the recipient's
+        goggles and of the radio bound with the same phrase
+
+        :param index: Standard VTX table index (0-47)
+        """
+        packet = MSPPacket()
+        packet.set_function(MSPTypes.MSP_SET_VTX_CONFIG)
+        packet.set_payload(bytes((index, 0)))
+        self.send_msp(packet)
+
+    def _vtx_mode(self) -> int:
+        """
+        The selected "Backpack Channel Mode"
+        """
+        return self._rhapi.db.option("_vtx_mode", None, as_int=True) or VTX_MODE_OFF
+
+    def _sending_enabled(self) -> bool:
+        """
+        Checks the channel mode allows sending channels to pilots, and tells
+        the user how to change it if not
+        """
+        if self._vtx_mode() == VTX_MODE_SEND:
+            return True
+
+        message = (
+            "Set Backpack Channel Mode to 'RotorHazard sends to pilots' "
+            "in the ELRS Backpack settings to send channels"
+        )
+        self._rhapi.ui.message_notify(self._rhapi.language.__(message))
+        return False
+
+    def _pilot_label(self, pilot_id: int) -> str:
+        pilot = self._rhapi.db.pilot_by_id(pilot_id)
+        return pilot.display_callsign if pilot else str(pilot_id)
+
+    def _send_channels(self, assignments: dict, empty_message: str) -> None:
+        """
+        Sends each pilot the channel of their node
+
+        :param assignments: Node of each pilot, by pilot id
+        :param empty_message: Notification when there is nobody to send to
+        """
+        if not self._backpack_connected:
+            message = "Backpack not connected"
+            self._rhapi.ui.message_notify(self._rhapi.language.__(message))
+            return
+
+        if not assignments:
+            self._rhapi.ui.message_notify(self._rhapi.language.__(empty_message))
+            return
+
+        frequencies = channels.node_frequencies(self._rhapi)
+        sent: list[str] = []
+        skipped: list[str] = []
+        targets = []
+
+        for pilot_id, node_index in assignments.items():
+            label = self._pilot_label(pilot_id)
+            index = channels.index_for_node(frequencies, node_index)
+            if index is None:
+                skipped.append(label)
+            else:
+                targets.append((pilot_id, index))
+                sent.append(label)
+
+        def send() -> None:
+            for pilot_id, index in targets:
+                uid = self.get_pilot_uid(pilot_id)
+                with self._queue_lock:
+                    self.set_send_uid(uid)
+                    self.send_vtx_index(index)
+                    self.reset_send_uid()
+                gevent.sleep(0.05)
+
+        gevent.spawn(send)
+
+        message = f"Channel sent to {len(sent)} pilot(s)"
+        if sent:
+            message += f": {', '.join(sent)}"
+        if skipped:
+            message += f". No usable channel for: {', '.join(skipped)}"
+        logger.info(message)
+        self._rhapi.ui.message_notify(self._rhapi.language.__(message))
+
+    def send_channels_current(self, *_) -> None:
+        """
+        Sends the channel to the pilots of the race about to be played
+        """
+        if not self._sending_enabled():
+            return
+
+        self._send_channels(
+            channels.current_assignments(self._rhapi), "No pilots in the current heat"
+        )
+
+    def send_channels_all(self, *_) -> None:
+        """
+        Sends the channel to every pilot of the planned heats, with the
+        channel of the first of those heats they race in
+        """
+        if not self._sending_enabled():
+            return
+
+        self._send_channels(
+            channels.upcoming_assignments(self._rhapi), "No pilots in the planned heats"
+        )
+
+    def send_channel_pilot(self, *_) -> None:
+        """
+        Sends the channel to the pilot selected in the plugin settings, with
+        the channel of the current heat or else of their next heat
+        """
+        if not self._sending_enabled():
+            return
+
+        pilot_id = self._rhapi.db.option("_send_pilot", None, as_int=True) or 0
+        if not pilot_id:
+            message = "Select a pilot first"
+            self._rhapi.ui.message_notify(self._rhapi.language.__(message))
+            return
+
+        upcoming = channels.upcoming_assignments(self._rhapi)
+        assignments = {pilot_id: upcoming[pilot_id]} if pilot_id in upcoming else {}
+        self._send_channels(assignments, "This pilot has no current or planned heat")
+
     def vtx_config_received(self, payload: bytes) -> None:
         """
         Moves the node selected in the plugin settings to the video channel
@@ -208,6 +345,9 @@ class ELRSBackpack(VRxController):
 
         :param payload: The MSP_SET_VTX_CONFIG payload
         """
+        if self._vtx_mode() != VTX_MODE_RECEIVE:
+            return
+
         node = self._rhapi.db.option("_vtx_node", None, as_int=True) or 0
         if node == 0:
             return

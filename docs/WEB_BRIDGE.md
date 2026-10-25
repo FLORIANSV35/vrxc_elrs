@@ -28,10 +28,27 @@ Garder l'onglet ouvert pendant l'événement. Un seul PC/onglet bridge à la foi
 
 Quand un pilote change son canal VTX depuis sa radio, le backpack de la radio diffuse un `MSP_SET_VTX_CONFIG`. Si le firmware de l'ESP timer remonte ce paquet par l'USB, le plugin applique la fréquence au node choisi.
 
-- Réglage : *Settings → ELRS Backpack General Settings → Node for Backpack Channel Changes* (0 = désactivé).
+- Réglages (*Settings → ELRS Backpack General Settings*) : **Backpack Channel Mode** = *Backpack controls node*, puis **Node Controlled by Backpack** = numéro du node.
 - Le paquet peut contenir un index de table VTX (bandes A B E F R L, 8 canaux) ou une fréquence en MHz. Les fréquences hors table sont appliquées sans bande ni canal.
 - Ignoré pendant une manche (staging ou course), pour ne pas décaler un node en plein chronométrage.
 - Le firmware **Race Timer officiel ne remonte pas** ce paquet : il faut un firmware ESP modifié.
+
+## Envoyer les canaux aux pilotes
+
+Panneau **ELRS Send Channels** sur la page *Run*, actif en mode *RotorHazard sends to pilots*. Rien n'est automatique : le directeur clique.
+
+- **Send to current pilots** : pilotes de la manche sur le point d'être jouée, avec la fréquence de leur node.
+- **Send to all pilots** : tous les pilotes des manches prévues (manche courante + manches pas encore courues). Chaque pilote reçoit la fréquence de la *première* de ces manches où il court.
+- **Send to pilot** : le pilote choisi dans la liste, avec la fréquence de la manche courante, sinon de sa prochaine manche.
+
+Le message part vers la bind phrase du pilote (réglage « ELRS BP Bind Phrase », sinon son callsign). Lunettes **et** radio qui partagent cette bind phrase le reçoivent : les lunettes changent de canal, et le module ELRS de la radio (ESP32) l'applique puis le transmet au VTX de la quad. Il n'y a pas de mécanisme de « pull » : une radio ne peut pas interroger RotorHazard.
+
+Mode : les deux fonctions s'excluent, on choisit dans *Backpack Channel Mode* (*Settings → ELRS Backpack General Settings*) :
+- **Off** : rien n'est utilisé.
+- **Backpack controls node** : un changement de canal remonté par la radio du directeur déplace le node choisi. Les boutons d'envoi sont refusés.
+- **RotorHazard sends to pilots** : les boutons de la page *Run* sont actifs, et les canaux remontés par la radio sont ignorés. Cela évite la boucle où la radio renvoie le canal qu'elle vient d'appliquer.
+
+Limites : seuls les canaux de la table VTX standard (bandes A B E F R L) passent. Un node avec une autre fréquence, ou une manche en attribution automatique des fréquences, est signalé et ignoré. L'option « Enable ELRS OSD » n'est pas requise pour ces boutons.
 
 ## Limites connues
 
